@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from skimage import measure
-from pygltflib import GLTF2, Scene, Node, Mesh, Buffer, BufferView, Accessor, Asset, Primitive
+from pygltflib import GLTF2
 from numba import jit, prange
 import open3d as o3d
 from noise import pnoise3
@@ -18,6 +18,10 @@ resolution = 500
 level = 4  
 
 X, Y, Z = np.mgrid[0:3**level:complex(0, resolution), 0:3**level:complex(0, resolution), 0:3**level:complex(0, resolution)]
+X = X.astype(np.float64)
+Y = Y.astype(np.float64)
+Z = Z.astype(np.float64)
+
 menger_values = np.zeros(X.shape, dtype=np.int32)
 
 for i in prange(X.shape[0]):
@@ -25,19 +29,30 @@ for i in prange(X.shape[0]):
         for k in prange(X.shape[2]):
             menger_values[i, j, k] = menger_sponge(X[i, j, k], Y[i, j, k], Z[i, j, k], level)
 
-verts, faces, normals, values = measure.marching_cubes(menger_values, level=0.5)
+verts, faces, normals, values = measure.marching_cubes(menger_values, level=0.5, spacing=(3.0 / (resolution - 1), 3.0 / (resolution - 1), 3.0 / (resolution - 1)))
+verts = verts.astype(np.float64)
 
 def generate_soft_colors(vertices):
-    colors = np.zeros((vertices.shape[0], 3))
+    colors = np.zeros((vertices.shape[0], 3), dtype=np.float64)
     for i in range(vertices.shape[0]):
         x, y, z = vertices[i]
-        r = pnoise3(x * 0.1, y * 0.1, z * 0.1) * 0.5 + 0.5
-        g = pnoise3(x * 0.1 + 10, y * 0.1 + 10, z * 0.1 + 10) * 0.5 + 0.5
-        b = pnoise3(x * 0.1 + 20, y * 0.1 + 20, z * 0.1 + 20) * 0.5 + 0.5
+        r = 0.5 + 0.5 * pnoise3(x * 0.1, y * 0.1, z * 0.1)
+        g = 0.5 + 0.5 * pnoise3(x * 0.1 + 10, y * 0.1 + 10, z * 0.1 + 10)
+        b = 0.5 + 0.5 * pnoise3(x * 0.1 + 20, y * 0.1 + 20, z * 0.1 + 20)
         colors[i] = [r, g, b]
     return colors
 
 vertex_colors = generate_soft_colors(verts)
+
+verts = verts.astype(np.float64)
+vertex_colors = vertex_colors.astype(np.float64)
+
+np.set_printoptions(precision=15, suppress=True)
+
+data = np.hstack((verts, vertex_colors))
+df = pd.DataFrame(data, columns=['x', 'y', 'z', 'r', 'g', 'b'])
+
+df.to_csv('menger_sponge_vertices_and_colors.csv', index=False, float_format='%.15f')
 
 mesh = o3d.geometry.TriangleMesh()
 mesh.vertices = o3d.utility.Vector3dVector(verts)
